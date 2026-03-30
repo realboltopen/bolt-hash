@@ -41,8 +41,8 @@
 | **Web dashboard** | — | ✅ | ✅ | ✅ |
 | **Bulk key generation** | — | ✅ | ✅ | ✅ |
 | **PayPal & Crypto (Web3)** | — | ✅ | ✅ | ✅ |
-| **CI/CD integration** (GitHub Actions, GitLab CI…) | — | — | ✅ (5 GB) | ✅ (50 GB) |
-| **Priority support chat** | — | — | — | ✅ |
+| **CI/CD integration** (GitHub Actions, GitLab CI…) | — | — | ✅ (500 MB) | ✅ More usage |
+| **Priority support chat** | — | — | ✅ | ✅ |
 
 👉 **[Compare plans and sign up → hash.boltopen.com/pricing](https://hash.boltopen.com/pricing)**
 
