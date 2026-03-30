@@ -1,0 +1,40 @@
+{
+  "name": "bolt-hash",
+  "version": "1.2.0",
+  "author": "mynamezxc",
+  "license": "MIT",
+  "description": "TUI/CLI tool for JS/TS obfuscation, byte encoding, and runtime integrity protection",
+  "main": "src/cli.js",
+  "bin": {
+    "bolt-hash": "src/cli.js",
+    "bolt": "src/cli.js"
+  },
+  "files": [
+    "src"
+  ],
+  "keywords": [
+    "obfuscator",
+    "hash",
+    "integrity",
+    "nodejs",
+    "typescript",
+    "tui"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "start": "node src/cli.js",
+    "build-protect": "node src/cli.js"
+  },
+  "dependencies": {
+    "chalk": "^4.1.2",
+    "fast-glob": "^3.3.3",
+    "fs-extra": "^11.3.0",
+    "javascript-obfuscator": "^4.1.1",
+    "typescript": "^5.8.2"
+  }
+}
