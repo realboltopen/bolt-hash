@@ -14,8 +14,8 @@
   <a href="https://hash.boltopen.com">🌐 hash.boltopen.com</a> &nbsp;|&nbsp;
   <a href="https://hash.boltopen.com/docs">📖 Docs</a> &nbsp;|&nbsp;
   <a href="https://hash.boltopen.com/pricing">💳 Pricing</a> &nbsp;|&nbsp;
-  <a href="https://hash.boltopen.com/install.sh">📦 Install (Linux/Mac)</a> &nbsp;|&nbsp;
-  <a href="https://hash.boltopen.com/install.ps1">📦 Install (Windows)</a>
+  <a href="https://hash.boltopen.com/download">📦 Install (Linux/Mac)</a> &nbsp;|&nbsp;
+  <a href="https://hash.boltopen.com/download">📦 Install (Windows)</a>
 </p>
 
 ---
