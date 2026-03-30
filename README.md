@@ -1,7 +1,7 @@
 # bolt-hash
 
 <p align="center">
-  <img src="img/BothHash_4x2.png" alt="Bolt-Hash" width="320">
+  <img src="img/BoltHash_4x2.png" alt="Bolt-Hash" width="320">
 </p>
 
 <p align="center">
@@ -58,10 +58,10 @@
 
 ```bash
 # Free
-npm install -g bolt-hash
+npm install -g @realboltopen/bolt-hash
 
 # Premium (includes everything above + license enforcement)
-npm install -g bolt-hash bolt-hash-premium
+[Download instruction] (https://hash.boltopen.com/download)
 ```
 
 ---
@@ -259,13 +259,13 @@ bolt-hash-premium wraps `bolt-hash` with license enforcement, device fingerprint
 ### Install
 
 ```bash
-npm install -g bolt-hash bolt-hash-premium
+npm install -g bolt-hash
 ```
 
 ### Quick start (2 commands)
 
 ```bash
-# 1. Set your license key once
+# 1. Set your license key once |(Premium only)
 bhp set license BH-XXXX-XXXX-XXXX-XXXX
 
 # 2. Navigate to your app and start
@@ -283,7 +283,7 @@ bhp start
 
 | Command | Effect |
 |---|---|
-| `bhp set license BH-XXXX-...` | Save license key |
+| `bhp set license BH-XXXX-...` | Save license key (premium only) |
 | `bhp set server https://your-server` | Point to a custom license server |
 | `bhp set apikey BHK-XXXX-...` | Save a third-party API key (for SDK integrations) |
 | `bhp set secret [VALUE]` | Manually set or rotate the manifest signing secret |
@@ -299,7 +299,7 @@ Output:
 ```
 License Key     : BH-E30C85B3...  (active, expires 2027-03-25)
 API Key         : (not set)        bhp set apikey BHK-...
-Server URL      : http://localhost:3888
+Server URL      : https://hash.boltopen.com
 Manifest Secret : a3f9b2...        bhp set secret  to rotate
 Config file     : C:\Users\you\.bolt-hash-premium\config.json
 Device ID       : win32-HOSTNAME-xxxxxxxx
