@@ -9,7 +9,12 @@
     "bolt": "src/cli.js"
   },
   "files": [
-    "src"
+    "src",
+    "img",
+    "screenshots",
+    "README.md",
+    "LICENSE",
+    ".gitignore"
   ],
   "keywords": [
     "obfuscator",

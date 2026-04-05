@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="img/logo_black.png" alt="Bolt-Hash" height="72">
+  <img src="https://raw.githubusercontent.com/realboltopen/bolt-hash/main/img/logo_black.png" alt="Bolt-Hash" height="72">
 </p>
 
 <h1 align="center">bolt-hash</h1>
@@ -73,7 +73,7 @@ bolt -h
 A normal Node.js / TypeScript project folder.
 
 <p align="center">
-  <img src="screenshots/1.png" alt="Source folder before protection" width="700">
+  <img src="https://raw.githubusercontent.com/realboltopen/bolt-hash/main/screenshots/1.png" alt="Source folder before protection" width="700">
 </p>
 
 ---
@@ -88,7 +88,7 @@ bolt
 The interactive TUI prompts for source dir, output dir, and an optional signing secret.
 
 <p align="center">
-  <img src="screenshots/2.png" alt="Running bolt command" width="700">
+  <img src="https://raw.githubusercontent.com/realboltopen/bolt-hash/main/screenshots/2.png" alt="Running bolt command" width="700">
 </p>
 
 ---
@@ -101,7 +101,7 @@ Every `.js` / `.ts` file is now obfuscated and byte-encoded. Two extra files are
 - `__bolt_integrity.js` — runtime checker loaded by every protected file at startup
 
 <p align="center">
-  <img src="screenshots/3.png" alt="Protected output folder" width="700">
+  <img src="https://raw.githubusercontent.com/realboltopen/bolt-hash/main/screenshots/3.png" alt="Protected output folder" width="700">
 </p>
 
 ---
@@ -111,7 +111,7 @@ Every `.js` / `.ts` file is now obfuscated and byte-encoded. Two extra files are
 Opening any protected `.js` file shows byte-encoded, obfuscated code.
 
 <p align="center">
-  <img src="screenshots/4.png" alt="Obfuscated source file" width="700">
+  <img src="https://raw.githubusercontent.com/realboltopen/bolt-hash/main/screenshots/4.png" alt="Obfuscated source file" width="700">
 </p>
 
 ---
@@ -127,7 +127,7 @@ bolt start
 `bolt start` verifies every file hash before launching. Any modification → immediate crash.
 
 <p align="center">
-  <img src="screenshots/5.png" alt="Running bolt start in protected output" width="700">
+  <img src="https://raw.githubusercontent.com/realboltopen/bolt-hash/main/screenshots/5.png" alt="Running bolt start in protected output" width="700">
 </p>
 
 ---
