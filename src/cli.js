@@ -17,7 +17,7 @@ const CODE_EXTENSIONS = new Set(['.js', '.cjs', '.mjs', '.ts', '.cts', '.mts', '
 const TYPESCRIPT_EXTENSIONS = new Set(['.ts', '.tsx', '.mts', '.cts']);
 const NODE_ENTRY_EXTENSIONS = new Set(['.js', '.cjs', '.mjs']);
 const PYTHON_ENTRY_EXTENSIONS = new Set(['.py']);
-const GITHUB_URL = 'https://github.com/mynamezxc/bolt-hash';
+const GITHUB_URL = 'https://github.com/realboltopen/bolt-hash';
 const BUILTIN_MODULES = new Set([
   ...builtinModules,
   ...builtinModules.map((moduleName) => moduleName.startsWith('node:') ? moduleName.slice(5) : `node:${moduleName}`)
@@ -27,25 +27,25 @@ const BUILTIN_MODULES = new Set([
 // bolt-hash (free) supports: Node.js + TypeScript server-side projects
 //   (Express, Fastify, NestJS, Koa, Hapi, etc.)
 // NOT supported: React, Vue, Nuxt, Angular, Next.js (SSR), Vite, CRA, SvelteKit
-// Use bolt-hash-premium for SPA / SSR / full-stack framework support.
+// Use bolt for SPA / SSR / full-stack framework support.
 const UNSUPPORTED_FRAMEWORK_DEPS = new Map([
-  ['react',              'React (use bolt-hash-premium)'],
-  ['react-dom',          'React (use bolt-hash-premium)'],
-  ['next',               'Next.js (use bolt-hash-premium)'],
-  ['nuxt',               'Nuxt (use bolt-hash-premium)'],
-  ['@nuxt/core',         'Nuxt (use bolt-hash-premium)'],
-  ['vue',                'Vue.js (use bolt-hash-premium)'],
-  ['@vue/core',          'Vue.js (use bolt-hash-premium)'],
-  ['@angular/core',      'Angular (use bolt-hash-premium)'],
-  ['@sveltejs/kit',      'SvelteKit (use bolt-hash-premium)'],
-  ['vite',               'Vite (use bolt-hash-premium)'],
-  ['create-react-app',   'CRA (use bolt-hash-premium)'],
-  ['gatsby',             'Gatsby (use bolt-hash-premium)'],
-  ['remix',              'Remix (use bolt-hash-premium)'],
-  ['@remix-run/node',    'Remix (use bolt-hash-premium)'],
-  ['astro',              'Astro (use bolt-hash-premium)'],
-  ['svelte',             'Svelte (use bolt-hash-premium)'],
-  ['solid-js',           'SolidJS (use bolt-hash-premium)'],
+  ['react',              'React (use bolt)'],
+  ['react-dom',          'React (use bolt)'],
+  ['next',               'Next.js (use bolt)'],
+  ['nuxt',               'Nuxt (use bolt)'],
+  ['@nuxt/core',         'Nuxt (use bolt)'],
+  ['vue',                'Vue.js (use bolt)'],
+  ['@vue/core',          'Vue.js (use bolt)'],
+  ['@angular/core',      'Angular (use bolt)'],
+  ['@sveltejs/kit',      'SvelteKit (use bolt)'],
+  ['vite',               'Vite (use bolt)'],
+  ['create-react-app',   'CRA (use bolt)'],
+  ['gatsby',             'Gatsby (use bolt)'],
+  ['remix',              'Remix (use bolt)'],
+  ['@remix-run/node',    'Remix (use bolt)'],
+  ['astro',              'Astro (use bolt)'],
+  ['svelte',             'Svelte (use bolt)'],
+  ['solid-js',           'SolidJS (use bolt)'],
 ]);
 
 /**
@@ -83,6 +83,9 @@ const CORE_EXCLUDES = [
   '**/.nuxt/**'
 ];
 
+const SENSITIVE_ENV_KEY_REGEX = /(?:^|_)(?:SECRET|TOKEN|PASSWORD|PASSWD|PRIVATE_KEY|API_KEY|ACCESS_KEY|CLIENT_SECRET|JWT|DB_URL|DATABASE_URL|CONNECTION_STRING|LICENSE_KEY|SMTP_PASS|SMTP_PASSWORD|WEBHOOK_SECRET)$/i;
+const SENSITIVE_ENV_VALUE_REGEX = /(-----BEGIN [A-Z ]*PRIVATE KEY-----|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9_]{30,}|xox[baprs]-[A-Za-z0-9-]{10,}|sk_live_[A-Za-z0-9]{10,})/;
+
 async function main() {
   printBanner();
 
@@ -111,12 +114,12 @@ async function main() {
       console.log('');
       console.log(chalk.yellow(`⚠  Unsupported framework detected: ${chalk.bold(fwCheck.framework)}`));
       console.log(chalk.yellow(`   Detected dependency: ${chalk.bold(fwCheck.dep)}`));
-      console.log(chalk.yellow('   bolt-hash (free) supports server-side Node.js/TypeScript only.'));
-      console.log(chalk.yellow('   For SPA/SSR frameworks, use bolt-hash-premium.'));
+      console.log(chalk.yellow('   bolt (free) supports server-side Node.js/TypeScript only.'));
+      console.log(chalk.yellow('   For SPA/SSR frameworks, use bolt.'));
       console.log('');
       const proceed = await askConfirm(rl, 'Continue anyway (obfuscation only, no integrity guarantee)?', false);
       if (!proceed) {
-        throw new Error(`Aborted: ${fwCheck.framework} is not supported by bolt-hash (free edition)`);
+        throw new Error(`Aborted: ${fwCheck.framework} is not supported by bolt (free edition)`);
       }
     }
 
@@ -149,6 +152,8 @@ async function main() {
 
   const extraExcludes = parseCommaList(extraExcludeText);
   const ignorePatterns = [...CORE_EXCLUDES, ...extraExcludes];
+
+  await warnSensitiveEnvFiles(sourceDir);
 
   if (isSubPath(outputDir, sourceDir)) {
     const relativeOutput = normalizeSlashes(path.relative(sourceDir, outputDir));
@@ -187,16 +192,79 @@ async function main() {
   console.log(chalk.yellow('To run with integrity check: cd into the output directory, then run  bolt start  or  bolt run <script>'));
 }
 
+async function warnSensitiveEnvFiles(sourceDir) {
+  const envFiles = await fg(['**/.env', '**/.env.*'], {
+    cwd: sourceDir,
+    dot: true,
+    onlyFiles: true,
+    unique: true,
+    followSymbolicLinks: false,
+    ignore: ['**/.env.example', '**/node_modules/**', '**/.git/**', '**/dist/**', '**/build/**', '**/.next/**', '**/.nuxt/**', '**/protected_output/**']
+  });
+
+  const findings = [];
+  for (const relativePath of envFiles) {
+    const absPath = path.join(sourceDir, relativePath);
+    let content = '';
+    try {
+      const stat = await fse.stat(absPath);
+      if (stat.size > 256 * 1024) continue;
+      content = await fse.readFile(absPath, 'utf8');
+    } catch {
+      continue;
+    }
+
+    const keyHits = new Set();
+    for (const line of content.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+      if (!match) continue;
+      const key = match[1];
+      const value = match[2] || '';
+      if (SENSITIVE_ENV_KEY_REGEX.test(key)) keyHits.add(key);
+      if (value && SENSITIVE_ENV_VALUE_REGEX.test(value)) keyHits.add(`${key} (value-pattern)`);
+    }
+
+    if (keyHits.size > 0) {
+      findings.push({
+        filePath: normalizeSlashes(relativePath),
+        keys: Array.from(keyHits).slice(0, 6)
+      });
+    }
+  }
+
+  if (findings.length === 0) return;
+
+  console.log('');
+  console.log(chalk.bgYellow.black.bold(' ⚠ SENSITIVE .ENV CONTENT DETECTED '));
+  console.log(chalk.yellow('Potential secret keys were found in project .env files during hashing/protection.'));
+  findings.slice(0, 5).forEach((item) => {
+    console.log(chalk.yellow(`  - ${item.filePath}: ${item.keys.join(', ')}`));
+  });
+  if (findings.length > 5) {
+    console.log(chalk.yellow(`  ...and ${findings.length - 5} more file(s).`));
+  }
+  console.log(chalk.cyan('  Hardening guide: https://hash.boltopen.com/production-hardening'));
+  console.log(chalk.cyan('  Secret handling: https://hash.boltopen.com/docs#secrets-handling'));
+  console.log(chalk.yellow('  Recommendation: keep secrets in vault/CI secret store and inject at runtime.'));
+  console.log('');
+}
+
 function printBanner() {
-  console.log(chalk.bold.cyan('██████╗  ██████╗ ██╗  ████████╗    ██╗  ██╗ █████╗ ███████╗██╗  ██╗'));
-  console.log(chalk.bold.cyan('██╔══██╗██╔═══██╗██║  ╚══██╔══╝    ██║  ██║██╔══██╗██╔════╝██║  ██║'));
-  console.log(chalk.bold.cyan('██████╔╝██║   ██║██║     ██║       ███████║███████║███████╗███████║'));
-  console.log(chalk.bold.cyan('██╔══██╗██║   ██║██║     ██║       ██╔══██║██╔══██║╚════██║██╔══██║'));
-  console.log(chalk.bold.cyan('██████╔╝╚██████╔╝███████╗██║       ██║  ██║██║  ██║███████║██║  ██║'));
-  console.log(chalk.bold.cyan('╚═════╝  ╚═════╝ ╚══════╝╚═╝       ╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝'));
-  console.log(chalk.bold.blue(`v${version}  •  Powered by Mynamezxc`));
-  console.log(chalk.blue(GITHUB_URL));
-  console.log(chalk.bold.blue('----------------------------------------------------------------------------'));
+  console.log(chalk.bold.blue('\u2500'.repeat(72)));
+  console.log(chalk.bold.cyan('     \u2588\u2588\u2588\u2588\u2588\u2588\u2557  \u2588\u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2557  \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557    \u2588\u2588\u2557  \u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2557 \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2557  \u2588\u2588\u2557'));
+  console.log(chalk.bold.cyan('     \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2551  \u255a\u2550\u2550\u2588\u2588\u2554\u2550\u2550\u255d    \u2588\u2588\u2551  \u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2554\u2550\u2550\u2550\u2550\u255d\u2588\u2588\u2551  \u2588\u2588\u2551'));
+  console.log(chalk.bold.cyan('     \u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2551     \u2588\u2588\u2551       \u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551'));
+  console.log(chalk.bold.cyan('     \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2557\u2588\u2588\u2551   \u2588\u2588\u2551\u2588\u2588\u2551     \u2588\u2588\u2551       \u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2551\u255a\u2550\u2550\u2550\u2550\u2588\u2588\u2551\u2588\u2588\u2554\u2550\u2550\u2588\u2588\u2551'));
+  console.log(chalk.bold.cyan('     \u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u255a\u2588\u2588\u2588\u2588\u2588\u2588\u2554\u255d\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2557\u2588\u2588\u2551       \u2588\u2588\u2551  \u2588\u2588\u2551\u2588\u2588\u2551  \u2588\u2588\u2551\u2588\u2588\u2588\u2588\u2588\u2588\u2588\u2551\u2588\u2588\u2551  \u2588\u2588\u2551'));
+  console.log(chalk.bold.cyan('     \u255a\u2550\u2550\u2550\u2550\u2550\u255d  \u255a\u2550\u2550\u2550\u2550\u2550\u255d \u255a\u2550\u2550\u2550\u2550\u2550\u2550\u255d\u255a\u2550\u255d       \u255a\u2550\u255d  \u255a\u2550\u255d\u255a\u2550\u255d  \u255a\u2550\u255d\u255a\u2550\u2550\u2550\u2550\u2550\u2550\u255d\u255a\u2550\u255d  \u255a\u2550\u255d'));
+  console.log(chalk.bold.blue(`v${version}  \u2022  `) + chalk.bold.cyan('FREE') + chalk.bold.blue('  \u2022  Powered by BoltOpen'));
+  console.log(chalk.blue('Website       : https://hash.boltopen.com'));
+  console.log(chalk.blue('Docs          : https://hash.boltopen.com/docs'));
+  console.log(chalk.blue('Upgrade       : https://hash.boltopen.com/pricing'));
+  console.log(chalk.blue('Open Source   : https://github.com/realboltopen/bolt-hash'));
+  console.log(chalk.bold.blue('\u2500'.repeat(72)));
 }
 
 async function askText(rl, label, defaultValue) {
@@ -743,7 +811,7 @@ function createByteEncodedWrapper(obfuscatedCode, relativeOutputPath, integrityS
   const bytesText = Array.from(Buffer.from(obfuscatedCode, 'utf8')).join(',');
   const integrityImport = getIntegrityImportPath(relativeOutputPath);
 
-  return `'use strict';\nconst fs = require('fs');\nconst crypto = require('crypto');\nconst __boltIntegrityPath = require.resolve('${integrityImport}');\nconst __boltIntegrityActualHash = crypto.createHash('sha256').update(fs.readFileSync(__boltIntegrityPath)).digest('hex');\nif (__boltIntegrityActualHash !== '${integrityScriptExpectedHash}') {\n  throw new Error('[BOLT-INTEGRITY] Integrity checker file was modified: ' + __boltIntegrityPath);\n}\nconst __boltIntegrity = require('${integrityImport}');\n__boltIntegrity.verify();\nconst __boltBytes = [${bytesText}];\nconst __boltSource = Buffer.from(__boltBytes).toString('utf8');\neval(__boltSource);\n`;
+  return `'use strict';\nconst fs = require('fs');\nconst crypto = require('crypto');\nconst __boltIntegrityPath = require.resolve('${integrityImport}');\nconst __boltIntegrityActualHash = crypto.createHash('sha256').update(fs.readFileSync(__boltIntegrityPath)).digest('hex');\nif (__boltIntegrityActualHash !== '${integrityScriptExpectedHash}') {\n  throw new Error('[BOLT-INTEGRITY] Integrity checker file was modified: ' + __boltIntegrityPath);\n}\nconst __boltIntegrity = require('${integrityImport}');\n__boltIntegrity.verify();\nconst __boltBytes = [${bytesText}];\nconst __boltSource = Buffer.from(__boltBytes).toString('utf8');\nmodule._compile(__boltSource, __filename);\n`;
 }
 
 function getIntegrityImportPath(relativeOutputPath) {
@@ -939,7 +1007,7 @@ async function runScript(scriptName, extraArgs) {
   if (!fs.existsSync(manifestPath)) {
     throw new Error(
       `No __bolt_manifest.json found in the current directory (${cwd}).\n` +
-      `Run 'bolt-hash' (or 'bolt') first to protect your project, then run this command from the output directory.`
+      `Run 'bolt' first to protect your project, then run this command from the output directory.`
     );
   }
 
@@ -999,14 +1067,28 @@ async function runScript(scriptName, extraArgs) {
 
       console.log(chalk.cyan(`No 'scripts.start' found. Running custom command: ${fullCommand}`));
 
-      const customChild = spawn(fullCommand, {
+      const _isWin = process.platform === 'win32';
+      // Split command string into argv tokens (handles quoted args).
+      const _rawParts = fullCommand.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) || [fullCommand];
+      const _cmdParts = _rawParts.map((tok) => {
+        if (tok.length >= 2) {
+          if (tok[0] === '"' && tok[tok.length - 1] === '"') return tok.slice(1, -1).replace(/\\"/g, '"');
+          if (tok[0] === "'" && tok[tok.length - 1] === "'") return tok.slice(1, -1).replace(/\\'/g, "'");
+        }
+        return tok;
+      });
+      // Use cmd /c on Windows (avoids DEP0190: shell:true + args array).
+      const _spawnCmd = _isWin ? 'cmd' : _cmdParts[0];
+      const _spawnArgs = _isWin ? ['/c', ..._cmdParts] : _cmdParts.slice(1);
+
+      const customChild = spawn(_spawnCmd, _spawnArgs, {
         cwd,
         stdio: 'inherit',
         env: {
           ...process.env,
           ...(isManifestSigned(manifest) ? { BOLT_HASH_SECRET: runtimeSigningSecret } : {})
         },
-        shell: true
+        shell: false
       });
 
       customChild.on('error', (err) => {
@@ -1025,18 +1107,19 @@ async function runScript(scriptName, extraArgs) {
   const npmArgs = scriptName === 'start'
     ? ['start', ...extraArgs]
     : ['run', scriptName, ...extraArgs];
-  const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  // On Windows use cmd /c to launch npm without shell:true + args (avoids DEP0190).
+  const _win = process.platform === 'win32';
+  const _spawnCmd = _win ? 'cmd' : 'npm';
+  const _spawnArgs = _win ? ['/c', 'npm', ...npmArgs] : npmArgs;
 
-  const child = spawn(npmCmd, npmArgs, {
+  const child = spawn(_spawnCmd, _spawnArgs, {
     cwd,
     stdio: 'inherit',
     env: {
       ...process.env,
       ...(isManifestSigned(manifest) ? { BOLT_HASH_SECRET: runtimeSigningSecret } : {})
     },
-    // On Windows, .cmd files require shell:true to be invoked correctly.
-    // On Unix, shell:false is preferred (faster, no extra shell process).
-    shell: process.platform === 'win32'
+    shell: false
   });
 
   child.on('error', (err) => {
@@ -1094,23 +1177,69 @@ async function askForRuntimeSigningSecret() {
   }
 }
 
+// ======= Help =======
+function showHelp() {
+  printBanner();
+  console.log('');
+  console.log(chalk.white('Commands:'));
+  console.log(chalk.cyan('  bolt                        Protect project (obfuscate + SHA-256 manifest)'));
+  console.log(chalk.cyan('  bolt start                  Run protected project with integrity check'));
+  console.log(chalk.cyan('  bolt run <script>           Run npm script with integrity check'));
+  console.log(chalk.cyan('  bolt help | bolt -h         Show this help'));
+  console.log('');
+  console.log(chalk.white('Protect workflow:'));
+  console.log(chalk.cyan('  cd my-app'));
+  console.log(chalk.cyan('  bolt                        TUI: choose source dir, output dir, signing secret'));
+  console.log(chalk.cyan('  cd protected_output'));
+  console.log(chalk.cyan('  bolt start                  Verify SHA-256 integrity + HMAC signature, then launch'));
+  console.log('');
+  console.log(chalk.white('Manifest signing secret  (1 key — lock on protect, unlock on start):'));
+  console.log(chalk.cyan('  Auto-generated on first `bolt` run. Copy and keep it safe.'));
+  console.log(chalk.cyan('  Required by `bolt start` to verify the HMAC-signed manifest.'));
+  console.log(chalk.cyan('  Supply via:  BOLT_HASH_SECRET=<hex>  (env var — skips prompt)'));
+  console.log(chalk.cyan('  Or enter it interactively when `bolt start` prompts.'));
+  console.log(chalk.cyan('  Without a secret the manifest is unsigned: tampering is detectable'));
+  console.log(chalk.cyan('  via SHA-256 but not cryptographically authenticated (HMAC skipped).'));
+  console.log('');
+  console.log(chalk.white('Environment variables:'));
+  console.log(chalk.cyan('  BOLT_HASH_SECRET=<hex>      Manifest signing secret (overrides prompt)'));
+  console.log('');
+  console.log(chalk.white('Supported project types (free edition):'));
+  console.log(chalk.cyan('  Node.js + TypeScript server-side (Express, Fastify, NestJS, Koa, Hapi, ...)'));
+  console.log(chalk.yellow('  SPA/SSR frameworks (React, Vue, Nuxt, Next.js) → upgrade to Premium'));
+  console.log('');
+  console.log(chalk.white('Upgrade to Premium for:'));
+  console.log(chalk.cyan('  License key management + heartbeat kill timer + anti-cheat'));
+  console.log(chalk.cyan('  BGit version control  (bolt commit / bolt pull / bolt log)'));
+  console.log(chalk.cyan('  SPA/SSR dist integrity  (bolt protect-dist + bolt start-spa)'));
+  console.log(chalk.cyan('  CI/CD integration + monthly build quota tracking'));
+  console.log(chalk.cyan('  \u2192 https://hash.boltopen.com/pricing'));
+  console.log('');
+}
+
 if (require.main === module) {
   const [, , subcommand, ...subArgs] = process.argv;
 
   if (subcommand === 'start') {
     runScript('start', subArgs).catch((error) => {
-      console.error(chalk.red(`❌ Error: ${error.message}`));
+      console.error(chalk.red(`\u274c Error: ${error.message}`));
       process.exit(1);
     });
   } else if (subcommand === 'run' && subArgs.length > 0) {
     const [scriptName, ...restArgs] = subArgs;
     runScript(scriptName, restArgs).catch((error) => {
-      console.error(chalk.red(`❌ Error: ${error.message}`));
+      console.error(chalk.red(`\u274c Error: ${error.message}`));
       process.exit(1);
     });
+  } else if (subcommand === 'help' || subcommand === '-h' || subcommand === '--help') {
+    showHelp();
+  } else if (subcommand && subcommand !== 'protect') {
+    console.error(chalk.red(`\u274c Unknown command: ${subcommand}`));
+    console.error(chalk.yellow('Run `bolt help` or `bolt -h` to see available commands.'));
+    process.exit(1);
   } else {
     main().catch((error) => {
-      console.error(chalk.red(`❌ Error: ${error.message}`));
+      console.error(chalk.red(`\u274c Error: ${error.message}`));
       process.exit(1);
     });
   }

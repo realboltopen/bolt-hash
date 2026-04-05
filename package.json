@@ -1,12 +1,11 @@
 {
   "name": "@realboltopen/bolt-hash",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "author": "BoltOpen",
   "license": "MIT",
   "description": "TUI/CLI tool for JS/TS obfuscation, byte encoding, and runtime integrity protection",
   "main": "src/cli.js",
   "bin": {
-    "bolt-hash": "src/cli.js",
     "bolt": "src/cli.js"
   },
   "files": [
