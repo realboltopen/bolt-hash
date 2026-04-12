@@ -25,32 +25,29 @@ const BUILTIN_MODULES = new Set([
 
 // ── Supported frameworks (free edition) ──────────────────────────────────────
 // bolt-hash (free) supports: Node.js + TypeScript server-side projects
-//   (Express, Fastify, NestJS, Koa, Hapi, etc.)
-// NOT supported: React, Vue, Nuxt, Angular, Next.js (SSR), Vite, CRA, SvelteKit
-// Use bolt for SPA / SSR / full-stack framework support.
+//   Express, Fastify, NestJS, Koa, Hapi, Next.js (API routes / server),
+//   Nuxt (server middleware), plain TypeScript CLIs, etc.
+// NOT supported (client-side SPA bundles):
+//   React (CRA/Vite), Vue SPA, Angular, SvelteKit, Svelte, Astro, Gatsby, Remix
+// For SPA / full-stack projects use bolt (premium) → bolt protect-dist
 const UNSUPPORTED_FRAMEWORK_DEPS = new Map([
-  ['react',              'React (use bolt)'],
-  ['react-dom',          'React (use bolt)'],
-  ['next',               'Next.js (use bolt)'],
-  ['nuxt',               'Nuxt (use bolt)'],
-  ['@nuxt/core',         'Nuxt (use bolt)'],
-  ['vue',                'Vue.js (use bolt)'],
-  ['@vue/core',          'Vue.js (use bolt)'],
-  ['@angular/core',      'Angular (use bolt)'],
-  ['@sveltejs/kit',      'SvelteKit (use bolt)'],
-  ['vite',               'Vite (use bolt)'],
-  ['create-react-app',   'CRA (use bolt)'],
-  ['gatsby',             'Gatsby (use bolt)'],
-  ['remix',              'Remix (use bolt)'],
-  ['@remix-run/node',    'Remix (use bolt)'],
-  ['astro',              'Astro (use bolt)'],
-  ['svelte',             'Svelte (use bolt)'],
-  ['solid-js',           'SolidJS (use bolt)'],
+  ['react',              'React SPA'],
+  ['react-dom',          'React SPA'],
+  ['@angular/core',      'Angular'],
+  ['@sveltejs/kit',      'SvelteKit'],
+  ['svelte',             'Svelte'],
+  ['solid-js',           'SolidJS'],
+  ['gatsby',             'Gatsby'],
+  ['astro',              'Astro'],
 ]);
 
+// Packages that look like SPA frameworks but have a valid server-side runtime
+// — allow them through, just note that dist/ is excluded.
+const SERVER_SIDE_OK_DEPS = new Set(['next', 'nuxt', '@nuxt/core', 'vue', '@vue/core', 'remix', '@remix-run/node', 'vite']);
+
 /**
- * Check the source directory's package.json for unsupported frameworks.
- * Returns { supported: true } or { supported: false, framework: string, dep: string }
+ * Check the source directory's package.json for unsupported (pure-SPA) frameworks.
+ * Returns { supported: true } or { supported: false, framework: string, dep: string, isSpa: bool }
  */
 function detectFramework(sourceDir) {
   const pkgPath = path.join(sourceDir, 'package.json');
@@ -64,10 +61,31 @@ function detectFramework(sourceDir) {
   };
   for (const [dep, framework] of UNSUPPORTED_FRAMEWORK_DEPS) {
     if (dep in allDeps) {
-      return { supported: false, framework, dep };
+      // If project ALSO has a server-side dep, allow it (e.g. react + express = SSR server)
+      const hasBackend = ['express','fastify','koa','@hapi/hapi','hapi','@nestjs/core','next-connect','elysia','h3'].some(d => d in allDeps);
+      if (hasBackend) return { supported: true };
+      return { supported: false, framework, dep, isSpa: true };
     }
   }
   return { supported: true };
+}
+
+/**
+ * Returns true when the source directory's package.json has "type": "module",
+ * meaning all .js files in the package are treated as ES modules by Node.js.
+ * This affects how protected output files must be written:
+ *   - .js files must remain ESM (no CJS wrapper / no require() / no module._compile)
+ *   - TypeScript-transpiled files must be written as .cjs (always CJS regardless of "type")
+ */
+function detectEsmPackage(sourceDir) {
+  try {
+    const pkgPath = path.join(sourceDir, 'package.json');
+    if (!fs.existsSync(pkgPath)) return false;
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8'));
+    return pkg.type === 'module';
+  } catch {
+    return false;
+  }
 }
 
 const CORE_EXCLUDES = [
@@ -112,15 +130,14 @@ async function main() {
     const fwCheck = detectFramework(sourceDir);
     if (!fwCheck.supported) {
       console.log('');
-      console.log(chalk.yellow(`⚠  Unsupported framework detected: ${chalk.bold(fwCheck.framework)}`));
-      console.log(chalk.yellow(`   Detected dependency: ${chalk.bold(fwCheck.dep)}`));
-      console.log(chalk.yellow('   bolt (free) supports server-side Node.js/TypeScript only.'));
-      console.log(chalk.yellow('   For SPA/SSR frameworks, use bolt.'));
+      console.log(chalk.bgRed.white.bold(' ❌ UNSUPPORTED FRAMEWORK '));
+      console.log(chalk.red(`   Detected: ${chalk.bold(fwCheck.framework)}  (dep: ${fwCheck.dep})`));
+      console.log(chalk.yellow('   bolt-hash (free) protects server-side Node.js/TypeScript only.'));
+      console.log(chalk.yellow('   Pure SPA projects must be built first, then use:'));
+      console.log(chalk.cyan('     bolt protect-dist   → hash build output (premium)'));
+      console.log(chalk.cyan('     bolt protect        → obfuscate server code   (premium)'));
       console.log('');
-      const proceed = await askConfirm(rl, 'Continue anyway (obfuscation only, no integrity guarantee)?', false);
-      if (!proceed) {
-        throw new Error(`Aborted: ${fwCheck.framework} is not supported by bolt (free edition)`);
-      }
+      throw new Error(`${fwCheck.framework} is a client-side SPA framework. Use bolt (premium) for SPA support.`);
     }
 
     const outputInput = await askText(rl, 'Output directory', path.join(sourceDir, 'protected_output'));
@@ -289,7 +306,7 @@ async function askConfirm(rl, label, defaultValue) {
   return ['y', 'yes'].includes(normalized);
 }
 
-async function protectProject({ sourceDir, outputDir, ignorePatterns, manifestSigningSecret }) {
+async function protectProject({ sourceDir, outputDir, ignorePatterns, manifestSigningSecret, extraOutputPaths }) {
   const sourceFiles = await fg('**/*', {
     cwd: sourceDir,
     onlyFiles: true,
@@ -303,11 +320,24 @@ async function protectProject({ sourceDir, outputDir, ignorePatterns, manifestSi
     .map((filePath) => normalizeSlashes(filePath))
     .sort((left, right) => left.localeCompare(right));
 
+  // Detect whether the source package is an ES module package ("type":"module").
+  // This governs how .js and TypeScript source files are handled in the output:
+  //   - .js files must remain ESM (no CJS wrapper)
+  //   - TypeScript/JSX → transpiled to CJS → written as .cjs (not .js)
+  //   - __bolt_integrity uses .cjs extension so it loads as CJS in any "type" setting
+  const isEsmPackage = detectEsmPackage(sourceDir);
+  const integrityFileName = isEsmPackage ? '__bolt_integrity.cjs' : '__bolt_integrity.js';
+
   const plan = sortedFiles.map((relativeInputPath) => {
     const extension = path.extname(relativeInputPath).toLowerCase();
-    const isCodeFile = CODE_EXTENSIONS.has(extension);
+    // TypeScript declaration files (.d.ts, .d.mts, .d.cts) contain only type
+    // information — no runtime code.  Treat them as plain assets so they are
+    // copied unchanged instead of being transpiled/obfuscated (which would fail
+    // because the obfuscator/parser does not understand type syntax).
+    const isDeclarationFile = /\.d\.[cm]?ts$/i.test(relativeInputPath);
+    const isCodeFile = !isDeclarationFile && CODE_EXTENSIONS.has(extension);
     const relativeOutputPath = isCodeFile
-      ? withJsExtension(relativeInputPath)
+      ? withJsExtension(relativeInputPath, isEsmPackage)
       : relativeInputPath;
 
     return {
@@ -321,6 +351,14 @@ async function protectProject({ sourceDir, outputDir, ignorePatterns, manifestSi
     plan.map((item) => [normalizeRelativePath(item.relativeInputPath), normalizeRelativePath(item.relativeOutputPath)])
   );
   const outputFilesSet = new Set(plan.map((item) => normalizeSlashes(item.relativeOutputPath)));
+  // Merge in extra paths provided by the caller (e.g. dist/ files that exist at
+  // runtime but are excluded from this protection pass and handled separately).
+  if (Array.isArray(extraOutputPaths)) {
+    for (const p of extraOutputPaths) {
+      const normalized = normalizeSlashes(String(p || ''));
+      if (normalized) outputFilesSet.add(normalized);
+    }
+  }
   const pathAliasConfig = loadTsConfigPathAliases(sourceDir);
   const integrityScriptContent = buildIntegrityScript();
   const integrityScriptHash = hashText(integrityScriptContent);
@@ -337,7 +375,7 @@ async function protectProject({ sourceDir, outputDir, ignorePatterns, manifestSi
     }
 
     const rawCode = await fse.readFile(srcPath, 'utf8');
-    const transpiledCode = transpileToCommonJs(rawCode, srcPath);
+    const transpiledCode = transpileToCommonJs(rawCode, srcPath, isEsmPackage);
     const rewrittenCode = rewriteRelativeImportExtensions(transpiledCode);
     const aliasRewrittenCode = rewriteTsconfigPathAliases({
       code: rewrittenCode,
@@ -347,8 +385,20 @@ async function protectProject({ sourceDir, outputDir, ignorePatterns, manifestSi
       pathAliasConfig
     });
     validateLocalSpecifiers(aliasRewrittenCode, fileItem.relativeOutputPath, outputFilesSet);
-    const obfuscatedCode = obfuscateCode(aliasRewrittenCode);
-    const wrappedCode = createByteEncodedWrapper(obfuscatedCode, fileItem.relativeOutputPath, integrityScriptHash);
+    const obfuscatedCode = obfuscateCode(aliasRewrittenCode, srcPath);
+
+    // Determine whether to skip the CJS byte-encoded wrapper.
+    // The CJS wrapper uses require() and module._compile() which are unavailable
+    // in ES module context. Skip it when:
+    //   - Input is .mjs   (always ESM, regardless of package.json "type")
+    //   - Input is .js    in a "type":"module" package (Node.js treats it as ESM)
+    // TypeScript/JSX inputs are transpiled to CJS and output as .cjs in ESM
+    // packages (handled by withJsExtension), so the CJS wrapper is safe for them.
+    const inputExt = path.extname(fileItem.relativeInputPath).toLowerCase();
+    const skipCjsWrapper = (inputExt === '.mjs') || (inputExt === '.js' && isEsmPackage);
+    const wrappedCode = skipCjsWrapper
+      ? obfuscatedCode
+      : createByteEncodedWrapper(obfuscatedCode, fileItem.relativeOutputPath, integrityScriptHash, integrityFileName);
 
     await fse.writeFile(outPath, wrappedCode, 'utf8');
   }
@@ -358,7 +408,7 @@ async function protectProject({ sourceDir, outputDir, ignorePatterns, manifestSi
     generatedAt: new Date().toISOString(),
     files: {},
     systemFiles: {
-      '__bolt_integrity.js': integrityScriptHash
+      [integrityFileName]: integrityScriptHash
     }
   };
 
@@ -379,15 +429,78 @@ async function protectProject({ sourceDir, outputDir, ignorePatterns, manifestSi
   }
 
   await fse.writeJson(path.join(outputDir, '__bolt_manifest.json'), manifest, { spaces: 2 });
-  await fse.writeFile(path.join(outputDir, '__bolt_integrity.js'), integrityScriptContent, 'utf8');
+  await fse.writeFile(path.join(outputDir, integrityFileName), integrityScriptContent, 'utf8');
 
-  await patchOutputPackageJson(outputDir);
+  await patchOutputPackageJson(outputDir, isEsmPackage);
+
+  // Write .mjs compatibility stubs for every .mjs source file that was renamed
+  // to .js in the protected output.  Hardcoded string references such as
+  //   const buildScript = "scripts/tsdown-build.mjs";
+  //   spawn(node, ["openclaw.mjs"])
+  // must still resolve at runtime.  Each stub is a one-liner ESM re-export that
+  // forwards execution to the protected .js file.  Stubs are NOT included in the
+  // manifest (they are generated helpers, not protected source files).
+  for (const fileItem of plan) {
+    if (path.extname(fileItem.relativeInputPath).toLowerCase() !== '.mjs') continue;
+    const jsBasename = path.basename(fileItem.relativeOutputPath); // e.g. tsdown-build.js
+    const mjsStubRelPath = fileItem.relativeOutputPath.slice(0, -3) + '.mjs';
+    const mjsStubPath = path.join(outputDir, mjsStubRelPath);
+    const stubContent = `// Auto-generated by bolt protect \u2014 compatibility stub.\n// Forwards .mjs extension references to the protected .js output.\nexport * from './${jsBasename}';\n`;
+    await fse.writeFile(mjsStubPath, stubContent, 'utf8');
+  }
+
+  // In ESM packages, TypeScript/JSX source files are transpiled to CJS and
+  // written as .cjs in the output.  Create a .js ESM stub for each so that any
+  // hardcoded ".js" string references (e.g. in scripts or spawn() calls) still
+  // resolve at runtime.  Stubs are NOT included in the manifest.
+  if (isEsmPackage) {
+    const TS_OR_JSX_EXTS = new Set(['.ts', '.tsx', '.mts', '.cts', '.jsx']);
+    for (const fileItem of plan) {
+      if (!fileItem.isCodeFile) continue;
+      const inputExt = path.extname(fileItem.relativeInputPath).toLowerCase();
+      if (!TS_OR_JSX_EXTS.has(inputExt)) continue; // only TS/JSX → .cjs outputs
+      const cjsBasename = path.basename(fileItem.relativeOutputPath); // e.g. foo.cjs
+      const jsStubRelPath = fileItem.relativeOutputPath.slice(0, -4) + '.js'; // foo.js
+      const jsStubPath = path.join(outputDir, jsStubRelPath);
+      // Use createRequire so the .cjs file (always CJS) can be loaded from ESM context.
+      const stubContent = [
+        `// Auto-generated by bolt protect \u2014 ESM stub for TypeScript-derived .cjs output.`,
+        `import { createRequire } from 'node:module';`,
+        `const _require = createRequire(import.meta.url);`,
+        `export default _require('./${cjsBasename}');`,
+        `export * from './${cjsBasename}';`,
+        ``
+      ].join('\n');
+      await fse.writeFile(jsStubPath, stubContent, 'utf8');
+    }
+  }
+
+  // Print any import-resolution warnings gathered during the protect run.
+  // These are non-fatal (file is still hashed + integrity-wrapped).
+  if (_importWarnings.length > 0) {
+    // Deduplicate by file to avoid spamming the same file multiple times.
+    const byFile = new Map();
+    for (const w of _importWarnings) {
+      if (!byFile.has(w.relativeOutputPath)) byFile.set(w.relativeOutputPath, []);
+      byFile.get(w.relativeOutputPath).push(w.specifier);
+    }
+    console.warn(chalk.yellow(`\n⚠  ${_importWarnings.length} import(s) in ${byFile.size} file(s) could not be resolved in protected output:`));
+    for (const [file, specs] of byFile) {
+      console.warn(chalk.gray(`   ${file}`));
+      specs.slice(0, 3).forEach(s => console.warn(chalk.gray(`     → ${s}`)));
+      if (specs.length > 3) console.warn(chalk.gray(`     … and ${specs.length - 3} more`));
+    }
+    console.warn(chalk.gray('   These may be workspace/monorepo imports resolvable at runtime.\n'));
+    // Clear for subsequent calls
+    _importWarnings.length = 0;
+  }
 
   return {
     totalFiles: plan.length,
     codeFiles: plan.filter((item) => item.isCodeFile).length,
     assetFiles: plan.filter((item) => !item.isCodeFile).length,
-    manifestSigned: !!manifest.signed
+    manifestSigned: !!manifest.signed,
+    importWarnings: _importWarnings.length
   };
 }
 
@@ -600,6 +713,14 @@ function matchesAnyAliasRule(specifier, rules) {
   return rules.some((rule) => rule.aliasRegex.test(specifier));
 }
 
+// Accumulated import warnings emitted by validateLocalSpecifiers.
+// We collect them here and print a summary at the end rather than
+// throwing, because unresolvable imports in complex monorepos (e.g.
+// workspace-relative imports, auto-generated data files, scripts that
+// are dev-only utilities) should not block the protection run.
+// Security is provided by the integrity hash manifest, not by this check.
+const _importWarnings = [];
+
 function validateLocalSpecifiers(code, relativeOutputPath, outputFilesSet) {
   const staticSpecifiers = collectStaticSpecifiers(code, relativeOutputPath);
   if (staticSpecifiers.size === 0) {
@@ -616,13 +737,19 @@ function validateLocalSpecifiers(code, relativeOutputPath, outputFilesSet) {
     const normalizedSpecifier = normalizeSlashes(specifier);
     const resolvedBase = normalizeSlashes(path.posix.normalize(path.posix.join(baseDir, normalizedSpecifier)));
 
+    // If the resolved path escapes the output root, it's a monorepo cross-package
+    // import. Skip silently — it will exist at runtime in the full workspace.
+    if (resolvedBase.startsWith('..')) {
+      continue;
+    }
+
     if (isPotentiallyResolved(resolvedBase, outputFilesSet)) {
       continue;
     }
 
-    throw new Error(
-      `Local import/require cannot be resolved after build: '${specifier}' (in: ${relativeOutputPath})`
-    );
+    // Record warning instead of throwing. The file is still obfuscated and
+    // hashed — a broken import only causes a runtime error, not a security hole.
+    _importWarnings.push({ specifier, relativeOutputPath });
   }
 }
 
@@ -731,35 +858,60 @@ function isPotentiallyResolved(resolvedBasePath, outputFilesSet) {
   return false;
 }
 
-function transpileToCommonJs(code, filePath) {
-  const result = ts.transpileModule(code, {
-    compilerOptions: {
-      target: ts.ScriptTarget.ES2020,
-      module: ts.ModuleKind.CommonJS,
-      moduleResolution: ts.ModuleResolutionKind.Node10,
-      esModuleInterop: true,
-      allowSyntheticDefaultImports: true,
-      resolveJsonModule: true,
-      sourceMap: false,
-      inlineSourceMap: false,
-      removeComments: false,
-      skipLibCheck: true
-    },
-    fileName: filePath,
-    reportDiagnostics: true
-  });
+function transpileToCommonJs(code, filePath, isEsmPackage = false) {
+  // .mjs files use explicit ESM semantics — do NOT convert to CJS because Node.js
+  // will load them as ES modules regardless of the package.json "type" field.
+  // Return verbatim; the obfuscator handles ESM syntax fine.
+  const inputExt = filePath ? path.extname(filePath).toLowerCase() : '';
+  if (inputExt === '.mjs' || inputExt === '.cjs') return code;
 
-  if (result.diagnostics && result.diagnostics.length > 0) {
-    const critical = result.diagnostics.filter((diag) => diag.category === ts.DiagnosticCategory.Error);
-    if (critical.length > 0) {
-      const message = critical
-        .map((diag) => ts.flattenDiagnosticMessageText(diag.messageText, '\n'))
-        .join('\n');
-      throw new Error(`TypeScript/JavaScript transpile error in ${filePath}:\n${message}`);
+  // .js files in a "type":"module" package must remain as ESM — Node.js will
+  // treat them as ES modules and reject require()/module._compile usage.
+  // Return verbatim so the obfuscator receives clean ESM source.
+  if (inputExt === '.js' && isEsmPackage) return code;
+
+  // ts.transpileModule can throw internal TypeScript errors (e.g. "Debug Failure:
+  // Output generation failed") on pre-built/minified JS that has unusual AST
+  // patterns.  Rather than crashing the whole protect run, fall back to the
+  // raw code — the file is still included in the manifest and integrity-wrapped.
+  try {
+    const result = ts.transpileModule(code, {
+      compilerOptions: {
+        target: ts.ScriptTarget.ES2020,
+        module: ts.ModuleKind.CommonJS,
+        moduleResolution: ts.ModuleResolutionKind.Node10,
+        esModuleInterop: true,
+        allowSyntheticDefaultImports: true,
+        resolveJsonModule: true,
+        sourceMap: false,
+        inlineSourceMap: false,
+        removeComments: false,
+        skipLibCheck: true
+      },
+      fileName: filePath,
+      reportDiagnostics: true
+    });
+
+    if (result.diagnostics && result.diagnostics.length > 0) {
+      const critical = result.diagnostics.filter((diag) => diag.category === ts.DiagnosticCategory.Error);
+      if (critical.length > 0) {
+        const message = critical
+          .map((diag) => ts.flattenDiagnosticMessageText(diag.messageText, '\n'))
+          .join('\n');
+        const hint = filePath ? ` (${path.basename(filePath)})` : '';
+        console.warn(chalk.yellow(`[bolt] ⚠ Transpile skipped${hint}: ${message.split('\n')[0].slice(0, 120)}`));
+        console.warn(chalk.gray('       File will be included in manifest unchanged.'));
+        return code;
+      }
     }
-  }
 
-  return result.outputText;
+    return result.outputText;
+  } catch (tsErr) {
+    const hint = filePath ? ` (${path.basename(filePath)})` : '';
+    console.warn(chalk.yellow(`[bolt] ⚠ Transpile skipped${hint}: ${tsErr.message.split('\n')[0].slice(0, 120)}`));
+    console.warn(chalk.gray('       File will be included in manifest unchanged.'));
+    return code;
+  }
 }
 
 function rewriteRelativeImportExtensions(code) {
@@ -771,7 +923,11 @@ function rewriteRelativeImportExtensions(code) {
       continue;
     }
 
-    const replacedSpecifier = entry.value.replace(/\.(ts|tsx|mts|cts|mjs|cjs|jsx)$/i, '.js');
+    // Rewrite TypeScript + .mjs source extensions → .js.
+    // .mjs files are renamed to .js in protected output (so cross-file static
+    // imports like ./foo.js resolve correctly).
+    // .cjs files KEEP their .cjs extension, so .cjs specifiers are NOT rewritten.
+    const replacedSpecifier = entry.value.replace(/\.(ts|tsx|mts|cts|mjs|jsx)$/i, '.js');
     if (replacedSpecifier !== entry.value) {
       replacements.push({
         start: entry.start,
@@ -784,39 +940,102 @@ function rewriteRelativeImportExtensions(code) {
   return applyStringReplacements(code, replacements);
 }
 
-function obfuscateCode(code) {
-  const result = JavaScriptObfuscator.obfuscate(code, {
-    compact: true,
-    simplify: true,
-    target: 'node',
-    renameGlobals: false,
-    stringArray: true,
-    stringArrayEncoding: ['base64'],
-    stringArrayShuffle: true,
-    stringArrayThreshold: 0.75,
-    transformObjectKeys: true,
-    selfDefending: false,
-    sourceMap: false,
-    numbersToExpressions: true,
-    deadCodeInjection: false,
-    controlFlowFlattening: false,
-    unicodeEscapeSequence: false,
-    identifierNamesGenerator: 'hexadecimal'
-  });
+function obfuscateCode(code, filePath) {
+  // Suppress promotional/advertising messages printed by javascript-obfuscator to console.
+  // They spam on every single file and clutter the protect output.
+  const origLog  = console.log;
+  const origWarn = console.warn;
+  const isObfPromo = (msg) => typeof msg === 'string' && msg.includes('[javascript-obfuscator]');
+  console.log  = (...args) => { if (!isObfPromo(args[0])) origLog(...args); };
+  console.warn = (...args) => { if (!isObfPromo(args[0])) origWarn(...args); };
 
-  return result.getObfuscatedCode();
+  try {
+    try {
+      const result = JavaScriptObfuscator.obfuscate(code, {
+        compact: true,
+        simplify: true,
+        target: 'node',
+        renameGlobals: false,
+        stringArray: true,
+        stringArrayEncoding: ['base64'],
+        stringArrayShuffle: true,
+        stringArrayThreshold: 0.75,
+        transformObjectKeys: true,
+        selfDefending: false,
+        sourceMap: false,
+        numbersToExpressions: true,
+        deadCodeInjection: false,
+        controlFlowFlattening: false,
+        unicodeEscapeSequence: false,
+        identifierNamesGenerator: 'hexadecimal'
+      });
+      return result.getObfuscatedCode();
+    } catch (parseErr) {
+      // The obfuscator parser (acorn) can fail on some transpiled patterns, e.g.
+      // `super` keyword outside a class body in Babel/tsc output, or non-standard
+      // generator syntax. Fall back to returning the code unchanged so the rest of
+      // the protect run can continue. Integrity wrapping still protects the file.
+      const hint = filePath ? ` (${path.basename(filePath)})` : '';
+      origWarn(chalk.yellow(`[bolt] ⚠ Obfuscation skipped${hint}: ${parseErr.message.slice(0, 160)}`));
+      origWarn(chalk.gray('       File will be included in manifest unchanged.'));
+      return code;
+    }
+  } finally {
+    console.log  = origLog;
+    console.warn = origWarn;
+  }
 }
 
-function createByteEncodedWrapper(obfuscatedCode, relativeOutputPath, integrityScriptExpectedHash) {
+function obfuscateForBrowser(code, filePath) {
+  const origLog  = console.log;
+  const origWarn = console.warn;
+  const isObfPromo = (msg) => typeof msg === 'string' && msg.includes('[javascript-obfuscator]');
+  console.log  = (...args) => { if (!isObfPromo(args[0])) origLog(...args); };
+  console.warn = (...args) => { if (!isObfPromo(args[0])) origWarn(...args); };
+
+  try {
+    try {
+      const result = JavaScriptObfuscator.obfuscate(code, {
+        compact: true,
+        simplify: true,
+        target: 'browser',
+        renameGlobals: false,
+        stringArray: true,
+        stringArrayEncoding: ['base64'],
+        stringArrayShuffle: true,
+        stringArrayThreshold: 0.75,
+        transformObjectKeys: true,
+        selfDefending: false,
+        sourceMap: false,
+        numbersToExpressions: true,
+        deadCodeInjection: false,
+        controlFlowFlattening: false,
+        unicodeEscapeSequence: false,
+        identifierNamesGenerator: 'hexadecimal'
+      });
+      return result.getObfuscatedCode();
+    } catch (parseErr) {
+      const hint = filePath ? ` (${path.basename(filePath)})` : '';
+      origWarn(chalk.yellow(`[bolt] ⚠ Obfuscation skipped${hint}: ${parseErr.message.slice(0, 160)}`));
+      origWarn(chalk.gray('       File will be included as-is.'));
+      return code;
+    }
+  } finally {
+    console.log  = origLog;
+    console.warn = origWarn;
+  }
+}
+
+function createByteEncodedWrapper(obfuscatedCode, relativeOutputPath, integrityScriptExpectedHash, integrityFileName = '__bolt_integrity.js') {
   const bytesText = Array.from(Buffer.from(obfuscatedCode, 'utf8')).join(',');
-  const integrityImport = getIntegrityImportPath(relativeOutputPath);
+  const integrityImport = getIntegrityImportPath(relativeOutputPath, integrityFileName);
 
   return `'use strict';\nconst fs = require('fs');\nconst crypto = require('crypto');\nconst __boltIntegrityPath = require.resolve('${integrityImport}');\nconst __boltIntegrityActualHash = crypto.createHash('sha256').update(fs.readFileSync(__boltIntegrityPath)).digest('hex');\nif (__boltIntegrityActualHash !== '${integrityScriptExpectedHash}') {\n  throw new Error('[BOLT-INTEGRITY] Integrity checker file was modified: ' + __boltIntegrityPath);\n}\nconst __boltIntegrity = require('${integrityImport}');\n__boltIntegrity.verify();\nconst __boltBytes = [${bytesText}];\nconst __boltSource = Buffer.from(__boltBytes).toString('utf8');\nmodule._compile(__boltSource, __filename);\n`;
 }
 
-function getIntegrityImportPath(relativeOutputPath) {
+function getIntegrityImportPath(relativeOutputPath, integrityFileName = '__bolt_integrity.js') {
   const fromDir = path.dirname(relativeOutputPath);
-  let relativePath = normalizeSlashes(path.relative(fromDir, '__bolt_integrity.js'));
+  let relativePath = normalizeSlashes(path.relative(fromDir, integrityFileName));
 
   if (!relativePath.startsWith('.')) {
     relativePath = `./${relativePath}`;
@@ -838,7 +1057,24 @@ function hashText(text) {
   return crypto.createHash('sha256').update(Buffer.from(String(text), 'utf8')).digest('hex');
 }
 
-function withJsExtension(relativePath) {
+function withJsExtension(relativePath, isEsmPackage = false) {
+  const ext = path.extname(relativePath).toLowerCase();
+  // .cjs files carry explicit module-type semantics — always loaded as CommonJS
+  // by Node.js regardless of package.json "type".  Keep the .cjs extension in
+  // the output so that: (1) hardcoded string references still resolve, and
+  // (2) require() / Node module-type detection continues to work correctly.
+  if (ext === '.cjs') return normalizeSlashes(relativePath);
+
+  // TypeScript and JSX source files are transpiled to CommonJS by transpileToCommonJs().
+  // In an ESM package ("type":"module"), .js files are treated as ES modules — a
+  // CommonJS file with require()/module.exports cannot be written as .js.
+  // Use .cjs extension so Node.js always loads it as CJS regardless of "type".
+  const TS_OR_JSX_EXTS = new Set(['.ts', '.tsx', '.mts', '.cts', '.jsx']);
+  if (isEsmPackage && TS_OR_JSX_EXTS.has(ext)) {
+    const parsed = path.parse(relativePath);
+    return normalizeSlashes(path.join(parsed.dir, `${parsed.name}.cjs`));
+  }
+
   const parsed = path.parse(relativePath);
   return normalizeSlashes(path.join(parsed.dir, `${parsed.name}.js`));
 }
@@ -1132,7 +1368,7 @@ async function runScript(scriptName, extraArgs) {
   });
 }
 
-async function patchOutputPackageJson(outputDir) {
+async function patchOutputPackageJson(outputDir, isEsmPackage = false) {
   const pkgPath = path.join(outputDir, 'package.json');
   if (!(await fse.pathExists(pkgPath))) {
     return;
@@ -1146,7 +1382,20 @@ async function patchOutputPackageJson(outputDir) {
   let modified = false;
   for (const [key, value] of Object.entries(pkg.scripts)) {
     if (typeof value === 'string') {
-      const updated = value.replace(/\.(ts|tsx|mts|cts)(?=[\s"'`]|$)/g, '.js');
+      let updated;
+      if (isEsmPackage) {
+        // In ESM packages, TypeScript/JSX files are output as .cjs (not .js) so
+        // that Node.js always loads their CJS wrapper as CJS.
+        // .mjs source files are renamed to .js (kept as ESM), same as non-ESM.
+        // .cjs files keep their extension as-is.
+        updated = value
+          .replace(/\.(ts|tsx|mts|cts|jsx)(?=[\s"'`]|$)/g, '.cjs')
+          .replace(/\.mjs(?=[\s"'`]|$)/g, '.js');
+      } else {
+        // Non-ESM packages: all TS/JSX/MJS compiled/renamed to .js.
+        // .cjs files keep their .cjs extension in output — do NOT rewrite them.
+        updated = value.replace(/\.(ts|tsx|mts|cts|mjs)(?=[\s"'`]|$)/g, '.js');
+      }
       if (updated !== value) {
         pkg.scripts[key] = updated;
         modified = true;
@@ -1245,6 +1494,54 @@ if (require.main === module) {
   }
 }
 
+// Obfuscate a pre-built dist/ bundle (tsdown / rolldown / webpack output).
+// Pre-built bundles are already minified; applying full identifier renaming on
+// top of minified code often breaks constructor calls and class references.
+// This variant uses ONLY string-array encoding (no identifier rename) which is
+// safe on any pre-built bundle while still hiding readable string literals.
+function obfuscateDistBundle(code, filePath) {
+  const origLog  = console.log;
+  const origWarn = console.warn;
+  const isObfPromo = (msg) => typeof msg === 'string' && msg.includes('[javascript-obfuscator]');
+  console.log  = (...args) => { if (!isObfPromo(args[0])) origLog(...args); };
+  console.warn = (...args) => { if (!isObfPromo(args[0])) origWarn(...args); };
+
+  try {
+    try {
+      const result = JavaScriptObfuscator.obfuscate(code, {
+        compact: true,
+        simplify: false,
+        target: 'node',
+        renameGlobals: false,
+        renameProperties: false,
+        // reservedNames intentionally omitted — ['.*'] causes internal stack
+        // overflow in the obfuscator even on tiny files. renameGlobals:false
+        // already protects ESM export aliases (n, t, r…) from being renamed.
+        stringArray: true,
+        stringArrayEncoding: ['base64'],
+        stringArrayShuffle: true,
+        stringArrayThreshold: 0.5,
+        transformObjectKeys: false,
+        selfDefending: false,
+        sourceMap: false,
+        numbersToExpressions: false,
+        deadCodeInjection: false,
+        controlFlowFlattening: false,
+        unicodeEscapeSequence: false
+      });
+      return result.getObfuscatedCode();
+    } catch (parseErr) {
+      const hint = filePath ? ` (${path.basename(filePath)})` : '';
+      origWarn(chalk.yellow(`[bolt] \u26a0 Obfuscation skipped${hint}: ${parseErr.message.slice(0, 160)}`));
+      origWarn(chalk.gray('       File will be included in manifest unchanged.'));
+      return code;
+    }
+  } finally {
+    console.log  = origLog;
+    console.warn = origWarn;
+  }
+}
+
 module.exports = {
   protectProject,
   transpileToCommonJs,
@@ -1253,5 +1550,8 @@ module.exports = {
   buildIntegrityScript,
   runScript,
   patchOutputPackageJson,
-  detectFramework
+  detectFramework,
+  obfuscateCode,
+  obfuscateForBrowser,
+  obfuscateDistBundle
 };
