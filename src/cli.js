@@ -899,8 +899,7 @@ function transpileToCommonJs(code, filePath, isEsmPackage = false) {
           .map((diag) => ts.flattenDiagnosticMessageText(diag.messageText, '\n'))
           .join('\n');
         const hint = filePath ? ` (${path.basename(filePath)})` : '';
-        console.warn(chalk.yellow(`[bolt] ⚠ Transpile skipped${hint}: ${message.split('\n')[0].slice(0, 120)}`));
-        console.warn(chalk.gray('       File will be included in manifest unchanged.'));
+        console.warn(chalk.yellow(`[bolt] ⚠ Transpile skipped${hint}. File will be included in manifest unchanged.`));
         return code;
       }
     }
@@ -908,8 +907,7 @@ function transpileToCommonJs(code, filePath, isEsmPackage = false) {
     return result.outputText;
   } catch (tsErr) {
     const hint = filePath ? ` (${path.basename(filePath)})` : '';
-    console.warn(chalk.yellow(`[bolt] ⚠ Transpile skipped${hint}: ${tsErr.message.split('\n')[0].slice(0, 120)}`));
-    console.warn(chalk.gray('       File will be included in manifest unchanged.'));
+    console.warn(chalk.yellow(`[bolt] ⚠ Transpile skipped${hint}. File will be included in manifest unchanged.`));
     return code;
   }
 }
@@ -976,8 +974,7 @@ function obfuscateCode(code, filePath) {
       // generator syntax. Fall back to returning the code unchanged so the rest of
       // the protect run can continue. Integrity wrapping still protects the file.
       const hint = filePath ? ` (${path.basename(filePath)})` : '';
-      origWarn(chalk.yellow(`[bolt] ⚠ Obfuscation skipped${hint}: ${parseErr.message.slice(0, 160)}`));
-      origWarn(chalk.gray('       File will be included in manifest unchanged.'));
+      origWarn(chalk.yellow(`[bolt] ⚠ Obfuscation skipped${hint}. File will be included in manifest unchanged.`));
       return code;
     }
   } finally {
@@ -1016,8 +1013,7 @@ function obfuscateForBrowser(code, filePath) {
       return result.getObfuscatedCode();
     } catch (parseErr) {
       const hint = filePath ? ` (${path.basename(filePath)})` : '';
-      origWarn(chalk.yellow(`[bolt] ⚠ Obfuscation skipped${hint}: ${parseErr.message.slice(0, 160)}`));
-      origWarn(chalk.gray('       File will be included as-is.'));
+      origWarn(chalk.yellow(`[bolt] ⚠ Obfuscation skipped${hint}. File will be included as-is.`));
       return code;
     }
   } finally {
@@ -1532,8 +1528,7 @@ function obfuscateDistBundle(code, filePath) {
       return result.getObfuscatedCode();
     } catch (parseErr) {
       const hint = filePath ? ` (${path.basename(filePath)})` : '';
-      origWarn(chalk.yellow(`[bolt] \u26a0 Obfuscation skipped${hint}: ${parseErr.message.slice(0, 160)}`));
-      origWarn(chalk.gray('       File will be included in manifest unchanged.'));
+      origWarn(chalk.yellow(`[bolt] ⚠ Obfuscation skipped${hint}. File will be included in manifest unchanged.`));
       return code;
     }
   } finally {
